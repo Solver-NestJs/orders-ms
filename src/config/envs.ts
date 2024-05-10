@@ -4,9 +4,7 @@ import * as joi from 'joi';
 interface EnvConfig {
   PORT: number;
   DATABASE_URL: string;
-
-  PRODUCTS_MICROSERVICES_PORT: number;
-  PRODUCTS_MICROSERVICES_HOST: string;
+  NATS_SERVERS: string[];
 }
 
 const envVarsSchema = joi
@@ -31,7 +29,5 @@ const envVars: EnvConfig = value;
 export const envs = {
   port: envVars.PORT,
   databaseUrl: envVars.DATABASE_URL,
-
-  productsPort: envVars.PRODUCTS_MICROSERVICES_PORT,
-  productsHost: envVars.PRODUCTS_MICROSERVICES_HOST,
+  natsServers: envVars.NATS_SERVERS,
 };
