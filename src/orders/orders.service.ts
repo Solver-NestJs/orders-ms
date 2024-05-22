@@ -6,12 +6,14 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { PrismaClient } from '@prisma/client';
+import { OrderStatus, PrismaClient } from '@prisma/client';
 import { OrderPaginationDto } from './dto/order-pagination.dto';
 import { ChangeStatusDto } from './dto/change-status.dto';
 import { NATS_SERVICES } from 'src/config/services';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { catchError, firstValueFrom } from 'rxjs';
+import { IOrderWithProducts } from './interfaces/IOrderWithProducts';
+import { PaidOrderDto } from './dto/paidOrder.dto';
 
 @Injectable()
 export class OrdersService extends PrismaClient implements OnModuleInit {
@@ -86,8 +88,8 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
     };
   }
 
-  async findAll(orderPaginatioDto: OrderPaginationDto) {
-    const { page, limit, status } = orderPaginatioDto;
+  async findAll(orderPaginationDto: OrderPaginationDto) {
+    const { page, limit, status } = orderPaginationDto;
     const [total, orders] = await Promise.all([
       await this.order.count({
         where: {
@@ -107,7 +109,7 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
       meta: {
         currentPage: page,
         totalItems: total,
-        totlPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(total / limit),
       },
     };
   }
@@ -170,5 +172,52 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
       where: { id: changeStatusDto.id },
       data: { orderStatus: changeStatusDto.status },
     });
+  }
+
+  async createPaymentSession(order: IOrderWithProducts) {
+    const paymentSession = await firstValueFrom(
+      this.client
+        .send('create.payment.session', {
+          orderId: order.id,
+          currency: 'usd',
+          items: order.orderItems.map((item) => ({
+            name: item.productName,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+        })
+        .pipe(
+          catchError((error) => {
+            throw new RpcException(error);
+          }),
+        ),
+    );
+
+    return {
+      cancelUrl: paymentSession.cancel_url,
+      successUrl: paymentSession.success_url,
+      paymentUrlSession: paymentSession.url,
+    };
+  }
+
+  async paidOrder(payload: PaidOrderDto) {
+    const order = await this.order.update({
+      where: { id: payload.orderId },
+      data: {
+        paid: true,
+        paidAt: new Date(),
+        stripeSessionId: payload.stripePaymentId,
+        orderStatus: OrderStatus.PAID,
+
+        orderReceipt: {
+          create: {
+            receiptUrl: payload.receiptUrl,
+          },
+        },
+      },
+    });
+
+    this.logger.log('Order updated to PAID');
+    return order;
   }
 }
